@@ -41,19 +41,20 @@ npm run test:scoped -- <改过的文件…>    # 依据测试文件自身的 imp
 
 ## 3. 其它验证入口
 
-| 命令                            | 验证什么                                                                                | 需要                     |
-| ------------------------------- | --------------------------------------------------------------------------------------- | ------------------------ |
-| `npm run test:contract`         | 工具面 / 平台矩阵 / 调度 / 容器的契约                                                   | —                        |
-| `npm run test:smoke`            | **空环境**：零项目接入也能装 / 起 / 自检 / 渲染                                         | —                        |
-| `npm run test:smoke:fresh`      | **干净 clone**：照 README 两步装起来，再真起一次桥                                      | 网络（2–6 分钟）         |
-| `npm run test:docker`           | 容器形态（`--full` 更全）                                                               | Docker                   |
-| `npm run test:extension`        | 扩展选项页的界面契约（三态读数 / 分组 / 三色 / 不横向溢出）                             | 真浏览器（playwright）   |
-| `npm run verify:oob`            | **开箱即用**：空环境 / 文档自足 / 发布物洁净 / 本机自检（`--full` 加干净 clone 与容器） | `--full` 需网络与 Docker |
-| `npm run verify:acceptance`     | 本机生产状态的端到端核对（草稿、项目、桥、调度…）                                       | 本机生产环境             |
-| `npm run verify:scheduled`      | 今日槽位日志是否收尾（只读）                                                            | —                        |
-| `npm run verify:immutable`      | 受保护 markdown 零修改 / 零删除 / 零移动                                                | —                        |
-| `npm run bench:views`           | 三库入口（留存 / 归档 / 报表）性能对照，宿主与容器可跑同一份                            | —                        |
-| `npm run repair:domain-orphans` | 修"默认域里残留着属于某个项目的记录"（默认 dry-run）                                    | —                        |
+| 命令                            | 验证什么                                                                                      | 需要                     |
+| ------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------ |
+| `npm run test:contract`         | 工具面 / 平台矩阵 / 调度 / 容器的契约                                                         | —                        |
+| `npm run test:smoke`            | **空环境**：零项目接入也能装 / 起 / 自检 / 渲染                                               | —                        |
+| `npm run test:smoke:fresh`      | **干净 clone**：照 README 两步装起来，再真起一次桥                                            | 网络（2–6 分钟）         |
+| `npm run test:docker`           | 容器形态（`--full` 更全）                                                                     | Docker                   |
+| `npm run test:extension`        | 扩展选项页的界面契约（三态读数 / 分组 / 三色 / 不横向溢出）                                   | 真浏览器（playwright）   |
+| `npm run docs:screenshots`      | 重新生成 README「界面」一节引用的 Console 截图（隔离沙箱 + 占位符替换 → `docs/images/*.png`） | 真浏览器（playwright）   |
+| `npm run verify:oob`            | **开箱即用**：空环境 / 文档自足 / 发布物洁净 / 本机自检（`--full` 加干净 clone 与容器）       | `--full` 需网络与 Docker |
+| `npm run verify:acceptance`     | 本机生产状态的端到端核对（草稿、项目、桥、调度…）                                             | 本机生产环境             |
+| `npm run verify:scheduled`      | 今日槽位日志是否收尾（只读）                                                                  | —                        |
+| `npm run verify:immutable`      | 受保护 markdown 零修改 / 零删除 / 零移动                                                      | —                        |
+| `npm run bench:views`           | 三库入口（留存 / 归档 / 报表）性能对照，宿主与容器可跑同一份                                  | —                        |
+| `npm run repair:domain-orphans` | 修"默认域里残留着属于某个项目的记录"（默认 dry-run）                                          | —                        |
 
 `verify:acceptance` **不进 CI**：它有一半检查依赖本机生产状态，
 在 runner 上会把"环境缺"报成"代码红"。CI（`.github/workflows/ci.yml`）跑的是
@@ -140,6 +141,12 @@ bridge/brand/                    md-backup/
 ```
 
 它们都在 `.gitignore` 里。提交前跑一次 `git status --short` 确认没有一条被误加。
+
+**文档截图同样算在内**：README 的 Console 截图由 `npm run docs:screenshots` 生成 ——
+它在隔离沙箱里取页面，把真实路径 / 用户名 / pid / 客户端标识 / token 换成占位符，
+并在落盘前断言"页面上已经没有本机痕迹"。不要手工截图后直接提交：PNG 是二进制，
+`release-artifact` 的家目录检查对图片扩展名整类跳过，手工图里的
+`/Users/<用户名>/…` 与草稿标题没人拦得住。
 
 ## 10. 许可
 

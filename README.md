@@ -57,6 +57,60 @@ npm run doctor                             # 期望 0 失败项
 **没有写作项目也能跑完这三步**：引擎的默认域可以是空的。要让引擎管你的草稿，
 再做一次[项目接入](docs/integration.md)——放一个 `.crosspost/project.json` 就行。
 
+## 界面
+
+Console 是桥托管的本地页面（`http://127.0.0.1:9540/`）。页面上的平台数量、样式清单、
+自检结果与 worker 车道状态全部来自引擎接口，前端不写死任何口径。下面八张图对应导航上的
+八个模块，取自一台干净的沙箱实例（一个示例写作项目 + 四篇示例草稿）；报表的费用为演示数据。
+
+### 接入与自检
+
+![接入与自检](docs/images/console-onboarding.png)
+
+「桥 → 扩展 → 平台登录 → 接入项目」四步的当前状态；没通过的那一步直接给出可照做的修复动作。
+
+### 文章
+
+![文章](docs/images/console-articles.png)
+
+每篇一行：栏目、风险、评分、各平台结果矩阵与总状态；顶部统计与平台成功率都从记录聚合。
+
+### 编写
+
+![编写](docs/images/console-editor.png)
+
+左边正文、右边实时预览，标题 / 日期 / 栏目 / 样式在抬头区；保存只写草稿，推送微信也只建官方草稿。
+
+### 选题库
+
+![选题库](docs/images/console-topics.png)
+
+每轮评分后的候选入池，按栏目筛选；落选可删（删前自动备份），已生成的选题直接链到文章。
+
+### 留存库
+
+![留存库](docs/images/console-retained.png)
+
+低分与高风险内容的人工缓冲：只支持恢复或删除，自动链路不参与。
+
+### 归档库
+
+![归档库](docs/images/console-archive.png)
+
+归档的草稿仍留在库里，可以恢复回文章列表，也可以彻底删除。
+
+### 报表
+
+![报表](docs/images/console-reports.png)
+
+产出量、平台成功率、状态构成与生成费用都在本地聚合，不经网络；费用按会话 usage 逐 step 计。
+
+### 设置
+
+![设置](docs/images/console-settings.png)
+
+平台、通知、评分与风险、品牌图标、备份、桥与代理、样式库、封面模板、定时槽位。
+
 ## 支持的平台
 
 **27 个已知平台**，分三级。唯一口径是 `crosspost-runtime/src/platform-matrix.mjs`，
