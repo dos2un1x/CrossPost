@@ -28,7 +28,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
-import { loadPaths, localRoot } from '../paths.mjs'
+import { loadPaths, localRoot, pathsPath } from '../paths.mjs'
+import { configPath } from '../config-path.mjs'
 import { checkNodeVersion, SEVERITY, checkWritableDir } from '../preflight.mjs'
 import { SUBPACKAGES, missingDeps, manualInstallCommands, coreBuilt } from '../deps.mjs'
 
@@ -192,7 +193,12 @@ export async function runSetup(opts = {}) {
   )
 
   // ── 2. paths.json（不覆盖） ──
-  const pathsFile = path.join(runtimeDir, 'paths.json')
+  // 路径走 `pathsPath()` / `configPath()`，**不**自己拼 `<runtimeDir>/…`：
+  // 有 `CROSSPOST_PATHS` / `CROSSPOST_CONFIG` 时（沙箱、容器、多实例）这两份必须落在
+  // 被指定的位置，否则沙箱里两份都不会生成，引擎随后读到的是**空配置**——
+  // 设置页显示成"什么都配了、其实都是兜底值"，而人看不出哪里不对。
+  // 生产不设这两个变量 → 路径与改动前逐字相同。
+  const pathsFile = pathsPath()
   const pathsRes = writeIfAbsent(pathsFile, defaultPaths(local, repoRoot))
   steps.push(
     step(
@@ -203,7 +209,7 @@ export async function runSetup(opts = {}) {
   )
 
   // ── 3. config.json（不覆盖） ──
-  const configFile = path.join(runtimeDir, 'config.json')
+  const configFile = configPath()
   const configRes = writeIfAbsent(configFile, defaultConfig())
   steps.push(
     step(

@@ -18,7 +18,17 @@ import { loadBrand } from './modules/brand.mjs'
 import { loadSlotLexicon } from './modules/slot-lexicon.mjs'
 
 /* ── 视图切换 ─────────────────────── */
-function switchView(name) {
+/**
+ * @param {string} name 视图名
+ * @param {{editorId?: string}} [opts] `editorId` = 深链 `#/editor/<id>` 里的草稿 id
+ *
+ * 为什么把 editorId 收进来（2026-09-29）：`#/editor/<id>` 此前会走两条路 ——
+ * `switchView('editor')` 自己调一次 `loadEditor()`（无 id），hash 处理器紧接着又调
+ * `loadEditor(id)`。两次都在 await 之后才进 `ensureEditorBuilt`，于是「是否已建」那道门
+ * 被同时穿过：同一个 host 里建出**两个** CodeMirror，且先建的空稿盖住了有内容的那一个
+ * （源码窗格没字，而 store 与右侧预览是对的）。现在一次导航只调一次 `loadEditor`。
+ */
+function switchView(name, opts = {}) {
   // 离开设置视图即停止状态轮询（2026-09-11：避免后台空转；只读 /proxy/status 也不该常驻）
   if (name !== 'settings') stopSettingsPoll()
   document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'))
@@ -48,7 +58,7 @@ function switchView(name) {
     if (name === 'archive') loadArchive()
     if (name === 'settings') loadSettings()
     if (name === 'reports') loadReports()
-    if (name === 'editor') loadEditor()
+    if (name === 'editor') loadEditor(opts.editorId)
   }
 }
 
@@ -92,8 +102,7 @@ window.addEventListener('load', async () => {
   const dm = h.match(/^#\/articles\/(.+)$/)
   const em = h.match(/^#\/editor\/(.+)$/)
   if (em) {
-    switchView('editor')
-    loadEditor(decodeURIComponent(em[1]))
+    switchView('editor', { editorId: decodeURIComponent(em[1]) })
   } else if (dm) {
     switchView('articles')
     openDetail(decodeURIComponent(dm[1]))
@@ -109,8 +118,7 @@ window.addEventListener('hashchange', () => {
   const dm = h.match(/^#\/articles\/(.+)$/)
   const em = h.match(/^#\/editor\/(.+)$/)
   if (em) {
-    switchView('editor')
-    loadEditor(decodeURIComponent(em[1]))
+    switchView('editor', { editorId: decodeURIComponent(em[1]) })
     return
   }
   if (dm) {

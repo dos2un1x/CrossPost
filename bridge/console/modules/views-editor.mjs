@@ -69,27 +69,47 @@ export async function loadEditor(id) {
 }
 
 /* ── 编辑器组件 ───────────────────── */
+/** 正在建的编辑器（单飞：并发调用共享同一个 Promise，不各建一个） */
+let editorBuildInflight = null
+
+/**
+ * 惰性建编辑器（幂等）。
+ *
+ * 2026-09-29：加**飞行中去重**。此前只有 `if (store.editor.editor) return` 一道门，
+ * 而进入编写页会并发走到这里（`switchView('editor')` 与 hash 处理器各一条路，
+ * 两次都在 await 之后才进来）→ 门被同时穿过，同一个 host 里建出**两个** CodeMirror：
+ * 先建的空稿盖住有内容的那一个，源码窗格看起来是空的（而 store 与右侧预览是对的）。
+ * 现在并发只会建一个；app.js 那侧也改成"一次导航只调一次 loadEditor"。
+ */
 async function ensureEditorBuilt() {
   if (store.editor.editor) return
-  const host = $('#ed-editor-host')
-  const value = currentMarkdown()
-  const { createEditor } = await loadCodeMirror()
-  store.editor.editor = createEditor({
-    parent: host,
-    value,
-    onChange: () => {
-      store.editor.dirty = true
-      schedulePreview()
-      markAutosave()
-      renderEditorState()
-    },
-    onSelection: (sel) => {
-      editorSelectionHandler(sel)
-      // v2.98.1：光标移动（不改文字）也要更新格式栏点亮态
-      syncFormatbarState()
-    },
-  })
-  attachSync({ editorHandle: store.editor.editor, previewFrame: $('#ed-preview-frame') })
+  if (editorBuildInflight) return editorBuildInflight
+  editorBuildInflight = (async () => {
+    const host = $('#ed-editor-host')
+    const value = currentMarkdown()
+    const { createEditor } = await loadCodeMirror()
+    store.editor.editor = createEditor({
+      parent: host,
+      value,
+      onChange: () => {
+        store.editor.dirty = true
+        schedulePreview()
+        markAutosave()
+        renderEditorState()
+      },
+      onSelection: (sel) => {
+        editorSelectionHandler(sel)
+        // v2.98.1：光标移动（不改文字）也要更新格式栏点亮态
+        syncFormatbarState()
+      },
+    })
+    attachSync({ editorHandle: store.editor.editor, previewFrame: $('#ed-preview-frame') })
+  })()
+  try {
+    await editorBuildInflight
+  } finally {
+    editorBuildInflight = null
+  }
 }
 
 function currentMarkdown() {

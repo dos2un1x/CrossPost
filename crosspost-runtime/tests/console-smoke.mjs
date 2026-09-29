@@ -2588,6 +2588,86 @@ results.push([
   bootstrapsAtFirstPaint === 1,
   `首屏=${bootstrapsAtFirstPaint}（改前 6）· 整轮 ${bootstrapCount} 次（含测试自己的 token 探针）/ 主文档加载 ${docLoads} 次`,
 ])
+
+// 2026-09-29：**编写页深链回归**（一次导航只许建一个 CodeMirror）。
+// 背景：`#/editor/<id>` 会同时走 `switchView('editor')→loadEditor()`（无 id）与 hash
+// 处理器的 `loadEditor(id)`，两次都在 await 之后才进 `ensureEditorBuilt`，于是
+// `if (store.editor.editor) return` 那道门被同时穿过：同一个 host 里建出两个实例，
+// 可见的那个是空稿（源码窗格没字，而 store 与右侧预览都是对的）——从文章详情点「编辑」
+// 或带 hash 刷新就会撞上，而用户下一步可能就是按「保存」。
+// 必须**新开一页**才有意义：编辑器只在首次进入该视图时创建（同页再来一次已被缓存挡住）。
+{
+  let ok = false
+  let detail = ''
+  try {
+    // 挑一个**真的能载入**的草稿：文章列表里的 id 可能是"记录已归档/文件已删"的
+    // （那种 id 打 `/proxy/draft/<id>` 会失败，编辑器自然是空的，测的就不是本缺陷了）。
+    const picked = await page.evaluate(async () => {
+      const tok = (await (await fetch('/proxy/bootstrap')).json()).token
+      const proj = localStorage.getItem('crosspost.activeProject') || ''
+      const headers = { 'X-CrossPost-Token': tok }
+      if (proj) headers['X-CrossPost-Project'] = proj
+      const list = await (await fetch('/proxy/articles', { headers })).json()
+      for (const a of (list.articles || []).slice(0, 10)) {
+        const r = await fetch('/proxy/draft/' + encodeURIComponent(a.id), { headers })
+        if (!r.ok) continue
+        const d = await r.json()
+        if (d && typeof d.markdown === 'string' && d.markdown.trim()) return { id: a.id, proj }
+      }
+      return null
+    })
+    if (!picked) {
+      ok = true
+      detail = '内容域里没有可载入的草稿（空内容域）→ 跳过'
+    } else {
+      // 用 browser.newPage()：这个 Playwright 版本对 page.context().newPage() 直接报
+      // "Please use browser.newContext()"；而 browser.newPage() 每次给的是**新上下文**
+      // （localStorage 是空的），所以先落一次普通页把当前项目写进 localStorage，
+      // 再带 hash 重新加载 —— 这样测的仍然是"冷启动直接进 `#/editor/<id>`"。
+      // 这一页**不关**：关掉共享隐式上下文里的页面会把整轮冒烟一起带走。
+      const fresh = await browser.newPage()
+      await fresh.goto(`${BASE}/#/articles`, { waitUntil: 'domcontentloaded' })
+      if (picked.proj) {
+        await fresh.evaluate((v) => localStorage.setItem('crosspost.activeProject', v), picked.proj)
+      }
+      await fresh.goto(`${BASE}/#/editor/${encodeURIComponent(picked.id)}`, {
+        waitUntil: 'domcontentloaded',
+      })
+      await fresh.waitForSelector('.cm-content', { timeout: 20000 })
+      await fresh
+        .waitForFunction(
+          () => {
+            const c = document.querySelector('.cm-content')
+            return (
+              !!c &&
+              (c.innerText || '').trim().length > 0 &&
+              document.querySelectorAll('.cm-editor').length === 1
+            )
+          },
+          null,
+          { timeout: 20000 },
+        )
+        .catch(() => {})
+      const st = await fresh.evaluate(() => ({
+        editors: document.querySelectorAll('.cm-editor').length,
+        textLen: ((document.querySelector('.cm-content') || {}).innerText || '').trim().length,
+        title: ((document.querySelector('#ed-title') || {}).value || '').length,
+        state: ((document.querySelector('#ed-save-state') || {}).textContent || '')
+          .trim()
+          .slice(0, 60),
+      }))
+      ok = st.editors === 1 && st.textLen > 0 && st.title > 0
+      detail =
+        `editors=${st.editors}（改前 2）· 源码窗格 ${st.textLen} 字 · 标题 ${st.title ? '已回填' : '空'}` +
+        (st.state ? ` · 状态「${st.state}」` : '')
+    }
+  } catch (e) {
+    ok = false
+    detail = '深链检查异常: ' + String(e && e.message)
+  }
+  results.push(['编写深链只建一个 CodeMirror 且源码窗格有字', ok, detail])
+}
+
 let healthDetail = ''
 let healthOk = false
 try {
