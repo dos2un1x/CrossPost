@@ -1,9 +1,9 @@
-// 文档图片卫生（README 的 Console 截图）
+// 文档图片卫生（README 的界面截图）
 //
-// README「界面」一节引用 `docs/images/*.png`。这批 PNG 是**唯一**还能绕过
-// `release-artifact.test.mjs` 发布物④（内容里不得出现真实家目录）的文件类型——
+// README「界面」一节引用 `docs/images/*.png`（Console 八个模块 + 扩展选项页）。这批 PNG 是
+// **唯一**还能绕过 `release-artifact.test.mjs` 发布物④（内容里不得出现真实家目录）的文件类型——
 // 那条规则对 png/jpg 等二进制扩展名整类跳过。图片本身由
-// `crosspost-runtime/tests/console-screenshots.mjs` 在隔离沙箱里生成，并在落盘前
+// `crosspost-runtime/tests/docs-screenshots.mjs` 在隔离沙箱里生成，并在落盘前
 // 对整份 DOM 断言过"页面已无本机痕迹"；本文件守的是另一半：
 //   ① 引用的图都在、且图片一律住在 docs/images/（不许散落）
 //   ② docs/images/ 里没有孤儿图（换了图忘了删旧图 = 发布物里多一份没人看的二进制）
@@ -23,9 +23,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.resolve(__dirname, '..', '..')
 const IMAGES_DIR = path.join(REPO, 'docs', 'images')
 const README = path.join(REPO, 'README.md')
-const GENERATOR = path.join('crosspost-runtime', 'tests', 'console-screenshots.mjs')
+const GENERATOR = path.join('crosspost-runtime', 'tests', 'docs-screenshots.mjs')
 
-/** 上限：生成器按 1440 CSS 宽 × DPR 2（= 2880px）拍整页，最长的一张是「设置」（约 8000px） */
+/** 上限：生成器按 1440 CSS 宽 × DPR 2（= 2880px）拍整页，最长的一张是「设置」（约 8000px）；
+ *  扩展选项页那张按 860 × DPR 2（= 1720px）拍，尺寸更小 */
 const MAX_BYTES = 4 * 1024 * 1024
 const MAX_WIDTH = 3000
 const MAX_HEIGHT = 9000

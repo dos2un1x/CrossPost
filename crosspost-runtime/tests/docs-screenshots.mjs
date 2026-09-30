@@ -1,10 +1,19 @@
 /**
- * README 截图生成器 —— 在隔离沙箱里拍 Console 的八个模块，把本机痕迹换成占位符后才落盘。
+ * README 截图生成器 —— 在隔离沙箱里拍 Console 的八个模块与浏览器扩展的选项页，
+ * 把本机痕迹换成占位符后才落盘。
  *
  * 干什么：起一个**临时桥**（随机高端口 + 临时数据根 + 临时 paths.json + 空的自定义样式
  * 目录 + 自有 token 文件），用无头 Chrome 按 Console 导航的八个模块各拍一张**整页**图
- * （顶栏 + 该模块全部内容），按下快门前先把页面上的本机痕迹替换成占位符、并断言替换干净，
- * 最后才把 PNG 写进 `docs/images/`。README「界面」一节引用的就是这八张图。
+ * （顶栏 + 该模块全部内容）；再起一个装了本仓库未打包扩展的临时浏览器 profile，
+ * 拍一张扩展选项页（`chrome-extension://<扩展 ID>/options.html`）。按下快门前先把页面上的
+ * 本机痕迹替换成占位符、并断言替换干净，最后才把 PNG 写进 `docs/images/`。
+ * README「界面」一节引用的就是这九张图。
+ *
+ * 扩展选项页为什么单起一个浏览器：MV3 扩展只在新版无头（`--headless=new`）或 headed 下
+ * 加载，而且它的数据（登录态、连接配置）走 `chrome.storage` 与扩展自己的 fetch，
+ * 不能像 Console 那样挂在沙箱桥上。所以那一张用 `page.route` 喂示例载荷
+ * （与报表页的费用卡同一手法：**示例数据**），平台名单与检查范围口径从
+ * `buildPlatformMatrix()` 派生 —— 页面上没有一处名单是手写的。
  *
  * 为什么不「手工截图 + 事后涂黑」：
  *   · `docs-hygiene.test.mjs` 与 `release-artifact.test.mjs` 都禁止真实家目录进产品文档，
@@ -16,6 +25,7 @@
  * 三层安全：
  *   ① 沙箱隔离：绝不碰生产 9539/9540，也绝不改写生产 `bridge/token.local`、
  *      `config.json`、`paths.json`（运行前后比 mtime+size），结束时杀桥 + 删沙箱；
+ *      扩展选项页另起一个临时浏览器 profile，跑完同样删掉；
  *   ② 掩码：沙箱路径 / 仓库路径 / 真实用户名 / worker pid / 扩展 clientId / token / 端口
  *      一律替换为占位符（`/Users/me/…` 这类，与文档里既有的示例写法一致）；
  *   ③ 门禁：替换后遍历**每一个 frame** 的 DOM（可见文本 + 表单值 + 属性 + option 文本），
@@ -23,12 +33,17 @@
  *      其后不再改内容，因此「DOM 文本干净」⇒「PNG 像素干净」。
  *      为什么要遍历 frame：编写模块的右侧预览是 `srcdoc` iframe，只扫主框架就是漏检。
  *
- * 一处例外：报表页的 `/proxy/costs` 用 `page.route` 喂固定载荷（页面右下两张费用卡为
- * **示例数据**）。原因是 `token-cost.mjs` 的会话缓存 `/tmp/dsh-session-{index,cost}.json`
- * 是硬编码且与生产桥共用的（只有文章费用文件有 env 覆盖），真调它会写沙箱之外；
- * 计价口径那一行仍取自引擎自己导出的 `PRICING`，不是编的。
+ * 两处「示例数据」（都是 `page.route` 喂的固定载荷，图上没有一处来自真实环境）：
+ *   · 报表页的 `/proxy/costs`：页面右下两张费用卡。原因是 `token-cost.mjs` 的会话缓存
+ *     `/tmp/dsh-session-{index,cost}.json` 是硬编码且与生产桥共用的（只有文章费用文件有
+ *     env 覆盖），真调它会写沙箱之外；计价口径那一行仍取自引擎自己导出的 `PRICING`。
+ *   · 扩展选项页：整页的数据（登录态 / 检查范围 / 连接状态）。扩展的取数地址来自
+ *     `chrome.storage`（默认 127.0.0.1:9539 = 生产桥），没法像 Console 那样指向沙箱桥，
+ *     真让它去取数就等于把生产桥的登录态拍进 README。名单与数量仍从 `buildPlatformMatrix()`
+ *     派生，不是手写的。
  *
- * 运行：npm run docs:screenshots        （本地维护者命令；需要系统 Chrome，不进 CI）
+ * 运行：npm run docs:screenshots   （本地维护者命令；需要系统 Chrome + playwright 自带的
+ *                                   Chromium，不进 CI）
  */
 import fs from 'node:fs'
 import os from 'node:os'
@@ -38,12 +53,15 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { PRICING } from '../src/token-cost.mjs'
 import { defaultConfig } from '../src/commands/setup.mjs'
+import { buildPlatformMatrix } from '../src/platform-matrix.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RUNTIME = path.resolve(__dirname, '..')
 const REPO = path.resolve(RUNTIME, '..')
 const OUT_DIR = path.join(REPO, 'docs', 'images')
 const NODE = process.execPath
+/** 未打包扩展的目录：扩展选项页那张图就拍它 */
+const EXT_DIR = path.join(REPO, 'bridge', 'chrome-proxy-extension')
 
 const WS_PORT = 26000 + Math.floor(Math.random() * 3000)
 const HTTP_PORT = WS_PORT + 1
@@ -53,6 +71,13 @@ const BASE = `http://127.0.0.1:${HTTP_PORT}`
  *  高度 9000px：最长的「设置」整页约 7950px（Chromium 单张上限远高于此）。 */
 const MAX_PNG_BYTES = 4 * 1024 * 1024
 const MAX_PNG_HEIGHT = 9000
+
+/** 扩展选项页那张图：文件名与视口。
+ *  视口 860 是"外壳 760 居中"两侧各留一点纸边的取景（`--shell` 在 ≥560px 时就是 760）。 */
+const EXT_SHOT = 'extension-options.png'
+const EXT_VIEWPORT = { width: 860, height: 900 }
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 /* ── 输出小工具 ─────────────────────────────────────────────────── */
 const notes = []
@@ -938,6 +963,159 @@ function demoCostsPayload(token) {
   }
 }
 
+/* ── 扩展选项页（第九张图）─────────────────────────────────────────
+ * 那一页的数据源是扩展自己的 fetch（`chrome.storage` 里配的 host:port，默认 127.0.0.1:9539），
+ * 没法像 Console 那样指向沙箱桥；真让它去取数就等于把生产桥的登录态拍进 README。
+ * 所以与报表页的费用卡同一手法：`page.route` 喂固定载荷（**示例数据**）。
+ * 但名单与口径不编：平台、检查范围、数量全部从 `buildPlatformMatrix()` 派生。
+ */
+function extDemoPayload(cacheMs) {
+  const m = buildPlatformMatrix()
+  const inScope = new Set(m.defaultSelected)
+  const scopeIds = m.platforms.filter((p) => inScope.has(p.id)).map((p) => p.id)
+  return {
+    /** `/proxy/platform-matrix`：全部 27 个的名字（未检查的平台只有这里有名字） */
+    matrix: { platforms: m.platforms.map(({ id, name }) => ({ id, name })) },
+    /** `/proxy/platforms`：范围内 12 个都算已登录，范围外 15 个是"未检查" */
+    platforms: {
+      platforms: scopeIds.map((id) => ({
+        id,
+        name: m.platforms.find((p) => p.id === id).name,
+        isAuthenticated: true,
+      })),
+      checkedAt: Date.now() - 2 * 60 * 1000, // 「上次检查 2 分钟前」
+      refreshing: false,
+      init: false,
+      lastMode: 'scope',
+      error: null,
+      scope: {
+        ids: scopeIds,
+        mode: 'scoped',
+        excluded: m.platforms.filter((p) => !inScope.has(p.id)).map((p) => p.id),
+        all: m.counts.all,
+        count: scopeIds.length,
+      },
+    },
+    status: { connected: true, platforms: { cacheMs } },
+  }
+}
+
+/**
+ * 拍扩展选项页。
+ *
+ * 浏览器用 playwright **自带的 Chromium**，不是系统 Chrome ——
+ * `extension-options-smoke.mjs` 实测：系统 Chrome 153 起忽略 `--load-extension`
+ * （打开 chrome-extension:// 直接 ERR_BLOCKED_BY_CLIENT），而 MV3 扩展只在新版无头
+ * （`--headless=new`）或 headed 下加载（playwright 的 `headless: true` 走 headless shell，
+ * 不带扩展支持）。所以这里 `headless: false` + `--headless=new` 起一个临时 profile。
+ *
+ * 与 Console 那八张同一套纪律：喂示例载荷 → 等页面渲染成"该有的样子" → 掩码 + 门禁 →
+ * 才截图。报头/底栏由 sticky 降级为静态（整页取景时不叠影、不悬在半途）。
+ */
+async function captureExtensionShot({ outDir, masks, deny, cacheMs }) {
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'cp-ext-shot-'))
+  const demo = extDemoPayload(cacheMs)
+  const want = demo.platforms.platforms.length
+  const unchecked = demo.platforms.scope.excluded.length
+  let ctx = null
+  try {
+    try {
+      ctx = await chromium.launchPersistentContext(profile, {
+        headless: false,
+        args: [
+          '--headless=new',
+          `--disable-extensions-except=${EXT_DIR}`,
+          `--load-extension=${EXT_DIR}`,
+        ],
+        viewport: EXT_VIEWPORT,
+        deviceScaleFactor: 2,
+        colorScheme: 'light',
+        locale: 'zh-CN',
+        timezoneId: 'Asia/Shanghai',
+      })
+    } catch (e) {
+      const msg = String((e && e.message) || e)
+      if (/Executable doesn't exist|install/i.test(msg)) {
+        throw new Error('playwright 自带的 Chromium 未安装：npx playwright install chromium')
+      }
+      throw e
+    }
+
+    // 扩展 ID 从它自己的 service worker 来（未打包扩展的 ID 由**目录路径**决定，
+    // 所以这里绝不能写死某个 ID：换台机器 clone 到别的路径就是另一个 ID）
+    let sw = ctx.serviceWorkers()[0]
+    for (let i = 0; i < 60 && !sw; i++) {
+      await sleep(250)
+      sw = ctx.serviceWorkers()[0]
+    }
+    if (!sw) throw new Error('扩展没加载起来（拿不到 service worker）')
+    const extId = new URL(sw.url()).host
+
+    const page = await ctx.newPage()
+    const pageErrors = []
+    page.on('pageerror', (e) => pageErrors.push(String(e.message)))
+    await page.route('**/proxy/bootstrap*', (r) => r.fulfill({ json: { token: 'token-xxxx' } }))
+    await page.route('**/proxy/status*', (r) => r.fulfill({ json: demo.status }))
+    await page.route('**/proxy/platform-matrix*', (r) => r.fulfill({ json: demo.matrix }))
+    await page.route('**/proxy/platforms*', (r) => r.fulfill({ json: demo.platforms }))
+
+    await page.goto(`chrome-extension://${extId}/options.html`, { waitUntil: 'domcontentloaded' })
+    // 判据：三格读数、可见栏的行数、以及 tab 上那句「未登录 0 · 未检查 15」全都到位才拍。
+    // 只等"有行"会拍出一张还停在「正在检查...」的图；那句未检查数正是这一页要讲的事，
+    // 它没渲染出来就说明页面还没到该有的样子。
+    await page.waitForFunction(
+      (a) => {
+        const txt = (id) => ((document.getElementById(id) || {}).textContent || '').trim()
+        const bar = document.getElementById('covBar')
+        return (
+          txt('sumOk') === String(a.want) &&
+          txt('sumScope').startsWith(String(a.want) + '/') &&
+          txt('tabNo').includes('未检查 ' + a.unchecked) &&
+          !!bar &&
+          !bar.hidden &&
+          document.querySelectorAll('#paneOk .pane-body .item').length === a.want
+        )
+      },
+      { want, unchecked },
+      { timeout: 30000 },
+    )
+    await sleep(400) // 首屏错峰上浮（.item.reveal）落定
+    await page.addStyleTag({
+      content: '.header{position:static !important}.footer{position:static !important}',
+    })
+
+    const gate = await maskAndGate(page, masks, deny)
+    if (gate.error) throw new Error(`扩展选项页上仍有真实值或掩码失效：${gate.error}`)
+
+    const target = path.join(outDir, EXT_SHOT)
+    await page.screenshot({ path: target, fullPage: true, animations: 'disabled' })
+
+    const buf = fs.readFileSync(target)
+    const size = pngSize(buf)
+    if (buf.length > MAX_PNG_BYTES || size.height > MAX_PNG_HEIGHT) {
+      throw new Error(
+        `扩展选项页超上限：${(buf.length / 1048576).toFixed(2)}MB / ${size.width}×${size.height}px`,
+      )
+    }
+    return {
+      file: EXT_SHOT,
+      target,
+      bytes: buf.length,
+      size,
+      frames: gate.frames,
+      pageErrors,
+      hits: Object.entries(gate.hits)
+        .filter(([, n]) => n > 0)
+        .map(([id, n]) => `${id}×${n}`)
+        .join(' '),
+      detail: `已登录 ${want} · 未检查 ${unchecked} · 范围 ${want}/${demo.platforms.scope.all}`,
+    }
+  } finally {
+    if (ctx) await ctx.close().catch(() => {})
+    fs.rmSync(profile, { recursive: true, force: true })
+  }
+}
+
 /* ── 主流程 ─────────────────────────────────────────────────────── */
 let bridge = null
 let browser = null
@@ -948,7 +1126,7 @@ const editorDraftId = demoId(DEMO[0])
 const EDITOR_MARKER = '为什么值得单独做一层'
 
 try {
-  console.log(`\n══════ README 截图生成（八个模块 · 整页）══════`)
+  console.log(`\n══════ README 截图生成（Console 八个模块 + 扩展选项页 · 整页）══════`)
   console.log(`沙箱：${sandbox}`)
   console.log(`隔离桥：WS ${WS_PORT} / HTTP ${HTTP_PORT}\n`)
 
@@ -1056,6 +1234,9 @@ try {
 
   const status = await api('/proxy/status')
   clientId = (status && status.ext && status.ext.client && status.ext.client.clientId) || ''
+  /** 扩展选项页的示例载荷要用桥真实的检查缓存周期（决定 tab 副标签说"本轮已核验"还是"旧账"） */
+  const cacheMs =
+    (status && status.platforms && status.platforms.cacheMs) || defaultConfig().platformsCacheMs
 
   /* 6. 浏览器 */
   const masks = buildMasks({ token, username: os.userInfo().username, clientId })
@@ -1165,13 +1346,32 @@ try {
 
   if (pageErrors.length) warn('页面 JS 报错', pageErrors.slice(0, 3).join(' | '))
 
-  /* 8. 原子发布：八张全过才进仓库 */
+  /* 8. 第九张：扩展选项页（另起一个装了未打包扩展的临时 profile；见 captureExtensionShot） */
+  let extShot = null
+  try {
+    extShot = await captureExtensionShot({ outDir: outTmp, masks, deny, cacheMs })
+  } catch (e) {
+    bad('[扩展选项页] 掩码/门禁/截图', String((e && e.message) || e))
+    throw new Error(`扩展选项页未通过，未写任何 PNG：${String((e && e.message) || e)}`)
+  }
+  if (extShot.pageErrors.length) {
+    warn('扩展选项页 JS 报错', extShot.pageErrors.slice(0, 3).join(' | '))
+  }
+  ok(
+    '[扩展选项页] 已拍',
+    `${extShot.file} · ${(extShot.bytes / 1024).toFixed(0)}KB · ` +
+      `${extShot.size.width}×${extShot.size.height}px · 整页 · ${extShot.detail} · ` +
+      `${extShot.frames} frame · 掩码 ${extShot.hits || '无'}`,
+  )
+
+  /* 9. 原子发布：九张全过才进仓库 */
+  const allShots = [...shotLog, extShot]
   fs.mkdirSync(OUT_DIR, { recursive: true })
-  for (const s of shotLog) {
+  for (const s of allShots) {
     fs.copyFileSync(s.target, path.join(OUT_DIR, s.file))
   }
-  ok('已写入 docs/images/', shotLog.map((s) => s.file).join(' '))
-  const keep = new Set(shotLog.map((s) => s.file))
+  ok('已写入 docs/images/', allShots.map((s) => s.file).join(' '))
+  const keep = new Set(allShots.map((s) => s.file))
   const stale = fs.readdirSync(OUT_DIR).filter((f) => f.endsWith('.png') && !keep.has(f))
   if (stale.length) {
     warn(
@@ -1180,12 +1380,12 @@ try {
     )
   }
 
-  /* 9. 生产零改动 */
+  /* 10. 生产零改动 */
   const prodAfter = prodSnapshot()
   ok('生产本机文件未被改写', prodAfter === prodBefore, prodAfter === prodBefore ? '' : prodAfter)
 
-  const totalKb = shotLog.reduce((a, s) => a + s.bytes, 0) / 1024
-  console.log(`\n合计 ${shotLog.length} 张 / ${totalKb.toFixed(0)}KB`)
+  const totalKb = allShots.reduce((a, s) => a + s.bytes, 0) / 1024
+  console.log(`\n合计 ${allShots.length} 张 / ${totalKb.toFixed(0)}KB`)
 } catch (err) {
   bad('生成失败', String(err && err.message ? err.message : err))
 } finally {
