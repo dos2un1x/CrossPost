@@ -38,6 +38,9 @@ import {
   CORE_DIST_ENTRIES,
 } from '../src/deps.mjs'
 import { runSetup } from '../src/commands/setup.mjs'
+// `pathsPath()`：断言"配置落点真的在沙箱里"。不 import `configPath` —— setup 通过
+// `configPath()` 落 config.json，这里只需要钉住 paths 这一侧（config 的隔离由 sha 断言覆盖）。
+import { pathsPath } from '../src/paths.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RUNTIME = path.resolve(__dirname, '..')
@@ -57,6 +60,34 @@ const sha = (file) =>
   fs.existsSync(file)
     ? crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
     : null
+
+/**
+ * 路径/配置的沙箱根 —— **必须在任何 runSetup() 之前**装好。
+ *
+ * 为什么需要它（2026-10-01 定时 CI 变红的根因）：
+ *   `runSetup({ repoRoot: 沙箱 })` 只决定"构建产物装到哪"，而 `paths.json` / `config.json`
+ *   的落点走的是 `pathsPath()` / `configPath()` —— 规则是
+ *   `CROSSPOST_PATHS || <runtime>/paths.json`，**与注入的 repoRoot 无关**。
+ *   于是不设这两个变量时，本文件会把一份由 `defaultPaths(local, sandboxRoot)` 算出来的
+ *   **沙箱骨架绝对路径**写进**真实仓库**的 `crosspost-runtime/paths.json`（本机安装物、已 gitignore）。
+ *
+ *   那些 `cp-deps-skeleton-*` 临时目录在本进程退出时被清掉，仓库里剩下的就是一批
+ *   **指向已删除目录的死路径**；随后 `workspace-naming.test.mjs` 会读这份文件并断言
+ *   "每个绝对路径都必须真实存在" → 断言失败。临时目录是否已被清掉取决于子进程退出时序，
+ *   所以表现为**随机红**（同一份代码本机绿、CI 红）。
+ *
+ * 指向沙箱之后：写入发生在 `tmpRoots` 里，随其它临时目录一起清理，
+ * 仓库那份安装物**字节不变**；下面 `repoPathsBefore` 就是用来钉住这一点的。
+ */
+const sandbox = tmpdir('setup-env')
+const sandboxPaths = path.join(sandbox, 'paths.json')
+const sandboxConfig = path.join(sandbox, 'config.json')
+process.env.CROSSPOST_PATHS = sandboxPaths
+process.env.CROSSPOST_CONFIG = sandboxConfig
+
+/** 仓库自己的 paths.json 基线（在任何写入之前取；null = 本来就不存在） */
+const realPathsFile = path.join(RUNTIME, 'paths.json')
+const repoPathsBefore = sha(realPathsFile)
 
 /** 造一个"干净 clone 的仓库骨架"：只有 package.json / lock，没有 node_modules */
 function skeleton() {
@@ -258,9 +289,9 @@ test('② 缺依赖时 runSetup 给出可执行计划，且不碰真实仓库', 
   process.env.CROSSPOST_CONFIG = path.join(root, 'config.json')
 
   // 真实仓库的两个配置文件：调用前后必须逐字节不变
-  const realPaths = path.join(RUNTIME, 'paths.json')
+  const realPaths = realPathsFile
   const realConfig = path.join(RUNTIME, 'config.json')
-  const before = { paths: sha(realPaths), config: sha(realConfig) }
+  const before = { paths: repoPathsBefore, config: sha(realConfig) }
 
   try {
     const plan = await runSetup({ repoRoot: root, start: false, open: false })
@@ -284,10 +315,18 @@ test('② 缺依赖时 runSetup 给出可执行计划，且不碰真实仓库', 
     const plan3 = await runSetup({ repoRoot: root })
     assert.equal(plan3.steps.find((s) => s.id === 'deps-install').status, 'kept')
 
-    // 真实仓库一个字节都没动
-    assert.equal(sha(realPaths), before.paths, '真实 paths.json 不该被改写')
+    // 真实仓库一个字节都没动 —— 两条都要判：
+    //   a) 内容哈希等于**调用前**的基线（`before` 必须来自模块级基线，不能在调用后现取，
+    //      否则"新建了一个"这种情况会拿建好的文件与自己比，永远相等 = 假通过）
+    //   b) 本来不存在的话，现在也必须仍然不存在（新建即污染，必须判红）
+    if (repoPathsBefore === null) {
+      assert.equal(fs.existsSync(realPaths), false, `测试不该在仓库里新建 ${realPaths}`)
+    } else {
+      assert.equal(sha(realPaths), before.paths, '真实 paths.json 不该被改写')
+    }
     assert.equal(sha(realConfig), before.config, '真实 config.json 不该被改写')
     // 而注入的仓库里确实生成了配置
+    assert.equal(pathsPath(), pathsFile, 'pathsPath() 必须落在沙箱里（否则这一条测的是生产文件）')
     assert.ok(fs.existsSync(pathsFile), '注入的 repoRoot 里应生成 paths.json')
   } finally {
     for (const [k, v] of Object.entries(prevEnv)) {
@@ -295,6 +334,19 @@ test('② 缺依赖时 runSetup 给出可执行计划，且不碰真实仓库', 
       else process.env[k] = v
     }
   }
+})
+
+test('②b 本文件全程不得污染仓库的 paths.json（安装物属主是使用者，不是测试）', () => {
+  // 与「②」的分工：「②」钉的是"那三次调用的前后不变"，这一条钉的是"**整个文件**跑完后的净效果"——
+  // 以后有人再加一个 runSetup 调用点却忘了把 CROSSPOST_PATHS 指到沙箱，这里会红。
+  // 它就是 2026-10-01 定时 CI 变红那件事的防回归断言。
+  assert.equal(
+    sha(realPathsFile),
+    repoPathsBefore,
+    `本文件把 ${realPathsFile} 改动了（应为 ${repoPathsBefore === null ? '仍不存在' : '字节不变'}）。` +
+      '原因几乎总是：新增的 runSetup() 调用点没有把 CROSSPOST_PATHS 指向沙箱 —— ' +
+      'pathsPath() 是 `CROSSPOST_PATHS || <runtime>/paths.json`，与注入的 repoRoot 无关。',
+  )
 })
 
 test('③ installDeps 按顺序真的调用 npm，失败即停', async (t) => {
