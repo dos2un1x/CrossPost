@@ -8,12 +8,12 @@
   "description": "CrossPost 核心逻辑 - 平台适配器、运行时抽象、同步引擎",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dos2un1x/CrossPost.git"
+    "url": "git+https://github.com/dos2un1x/crosspost.git"
   },
   "bugs": {
-    "url": "https://github.com/dos2un1x/CrossPost/issues"
+    "url": "https://github.com/dos2un1x/crosspost/issues"
   },
-  "homepage": "https://github.com/dos2un1x/CrossPost#readme",
+  "homepage": "https://github.com/dos2un1x/crosspost#readme",
   "author": "CrossPost",
   "keywords": [
     "crosspost",

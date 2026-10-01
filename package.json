@@ -10,12 +10,12 @@
   "description": "CrossPost/AI 发布流水线根工作区——统一 lint/format/typecheck/test 入口",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dos2un1x/CrossPost.git"
+    "url": "git+https://github.com/dos2un1x/crosspost.git"
   },
   "bugs": {
-    "url": "https://github.com/dos2un1x/CrossPost/issues"
+    "url": "https://github.com/dos2un1x/crosspost/issues"
   },
-  "homepage": "https://github.com/dos2un1x/CrossPost#readme",
+  "homepage": "https://github.com/dos2un1x/crosspost#readme",
   "scripts": {
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

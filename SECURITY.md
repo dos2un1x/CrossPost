@@ -33,10 +33,10 @@ CrossPost 是**本地运行、复用你自己浏览器登录态**的多平台草
 ## 报告安全漏洞
 
 请通过仓库的 **GitHub Security Advisories**（私有报告通道）提交，避免公开细节导致被利用：
-<https://github.com/dos2un1x/CrossPost/security/advisories/new>。
+<https://github.com/dos2un1x/crosspost/security/advisories/new>。
 请附上复现步骤与受影响版本（`npm run doctor` 会打印引擎版本）。
 
-本仓库当前为**私有仓库**：如果你没有访问权限，请先联系维护者开通，或改用仓库 Issues 里标注安全渠道的联系方式。
+本仓库为**公开仓库**，任何人都可以阅读代码、提交 Issue 与 PR。因此安全漏洞**务必**走上面的私有报告通道，不要在公开 Issue 或 PR 中披露复现细节。
 
 ## 数据落点
 
