@@ -21,21 +21,27 @@
 `defaultConfig()` 生成的初始内容既含引擎级键，也含**项目级键的出厂默认值**
 （项目没覆盖时用它们）。
 
-| 键                                     | 默认                 | 说明                                                                                |
-| -------------------------------------- | -------------------- | ----------------------------------------------------------------------------------- |
-| `proxyMode`                            | `true`               | 走浏览器代理通道（**唯一的出口**；无中转服务器）                                    |
-| `proxyHost` / `proxyHttpPort`          | `127.0.0.1` / `9540` | 桥的监听地址与端口（Console 也在同一个端口）                                        |
-| `timeoutMs`                            | `150000`             | 单次引擎调用超时                                                                    |
-| `platformsCacheMs`                     | `3600000`            | 平台登录态缓存时长（1 小时）                                                        |
-| `platformsCheckConcurrency`            | `6`                  | 平台登录态并发探测数                                                                |
-| `concurrency`                          | `3`                  | 发布并发数                                                                          |
-| `projectsDirs`                         | `[]`                 | 项目注册表**扫描根**（本机部署才会写具体值）                                        |
-| `scheduler.tz`                         | `Asia/Shanghai`      | 槽位时间按哪个时区解释（与宿主机本地时区无关，见 [`scheduling.md`](scheduling.md)） |
-| `scheduler.catchUpMaxMinutes`          | `120`                | 补跑窗口（分钟）；`0` = 不补跑                                                      |
-| `scheduler.maxConcurrent`              | `2`                  | 同时最多跑几个槽位                                                                  |
-| `slotExecutor.allowHosts`              | `[]`                 | 槽位 HTTP 执行器允许的**非环回**主机（缺省只允许环回）                              |
-| `slotExecutor.allowRemote`             | `false`              | 放开环回限制（与 `allowHosts` 二选一，见 [`scheduling.md`](scheduling.md) §4b）     |
-| `adapters.backfillFromRunLogs.enabled` | `false`              | 从运行日志回填；Console 没有入口暴露它                                              |
+| 键                                     | 默认                 | 说明                                                                                                                                                |
+| -------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `proxyMode`                            | `true`               | 走浏览器代理通道（**唯一的出口**；无中转服务器）                                                                                                    |
+| `proxyHost` / `proxyHttpPort`          | `127.0.0.1` / `9540` | 桥的监听地址与端口（Console 也在同一个端口）                                                                                                        |
+| `timeoutMs`                            | `150000`             | 单次引擎调用超时                                                                                                                                    |
+| `platformsCacheMs`                     | `3600000`            | 平台登录态缓存时长（1 小时）                                                                                                                        |
+| `platformsCheckConcurrency`            | `6`                  | 平台登录态并发探测数                                                                                                                                |
+| `concurrency`                          | `3`                  | 发布并发数                                                                                                                                          |
+| `projectsDirs`                         | `[]`                 | 项目注册表**扫描根**（本机部署才会写具体值）                                                                                                        |
+| `scheduler.tz`                         | `Asia/Shanghai`      | 槽位时间按哪个时区解释（与宿主机本地时区无关，见 [`scheduling.md`](scheduling.md)）                                                                 |
+| `scheduler.catchUpMaxMinutes`          | `120`                | 补跑窗口（分钟）；`0` = 不补跑                                                                                                                      |
+| `scheduler.maxConcurrent`              | `2`                  | 同时最多跑几个槽位                                                                                                                                  |
+| `slotExecutor.allowHosts`              | `[]`                 | 槽位 HTTP 执行器允许的**非环回**主机（缺省只允许环回）                                                                                              |
+| `slotExecutor.allowRemote`             | `false`              | 放开环回限制（与 `allowHosts` 二选一，见 [`scheduling.md`](scheduling.md) §4b）                                                                     |
+| `topicsGenerateMaxConcurrency`         | `1`                  | 「一键生成」队列的同时执行数（**夹取到 1–5**）；默认 1 = 串行，调大前必须先放开项目侧的两处锁，见 [`writing-pipelines.md`](writing-pipelines.md) §9 |
+| `topicsGenerateQueueMax`               | `50`                 | 队列容量（含正在跑的；夹取到 1–200），超出直接拒绝而不是无限堆积                                                                                    |
+| `adapters.backfillFromRunLogs.enabled` | `false`              | 从运行日志回填；Console 没有入口暴露它                                                                                                              |
+
+**「一键生成」的两个键都是引擎级**（不属于项目白名单）：队列与并发是引擎在编排，
+换项目不该让队列形状跟着变。临时调参可以用环境变量
+`CROSSPOST_TOPIC_GEN_MAX_CONCURRENCY=<1–5>` 覆盖并发（优先于配置）。
 
 ## 3. 项目级键（白名单，9 个）
 

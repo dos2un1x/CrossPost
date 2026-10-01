@@ -36,8 +36,18 @@ export const store = {
   topics: [],
   topicsPage: 1,
   topicsFilter: { slot: '', status: '', date: '', q: '' },
-  topicGenPoll: null,
-  topicBannerTick: null,
+  // 一键生成任务（v2.111 队列）：taskId → 任务；`topicTaskOf` 是 (slot|keyword) → taskId 反查
+  topicTasks: {},
+  topicTaskOf: {},
+  topicGenPoll: null, // 逐条任务轮询定时器（无活动任务时即清）
+  topicGenDone: true, // 本轮生成是否已收尾（true=可以停表；入队时清零以重新守望）
+  topicGenPending: false, // 刚入队、任务还没落表的那 4 秒空窗（此时不能停表）
+  topicGenPolling: false, // 这一拍轮询是否还在进行（收尾含全量刷新，可能超过 4s）
+  topicBannerTick: null, // 汇总条"已运行 mm:ss"的秒级刷新
+  topicGenProvided: true,
+  topicGenProvider: null,
+  topicGenUnavailable: null,
+  topicGenMaxConcurrency: 1,
   // 留存库
   retained: [],
   retainedPage: 1,

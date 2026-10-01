@@ -112,6 +112,24 @@
 **为什么 provider 走异步**：真实生成/真实槽位要跑几分钟到几十分钟；同步模式在任一中间层被掐断后，
 引擎就不知道任务还在不在跑。异步模式下状态在项目侧，引擎重启能重新问。
 
+### 5.1 「一键生成」是**队列**，一次 POST = 一条任务
+
+Console 上连点几条选题（或点「一键生成全部未生成」），引擎把它排成 FIFO 队列，
+按 `topicsGenerateMaxConcurrency`（**默认 1**）取队首执行。对项目侧的含义只有两条：
+
+- **一个任务一次 POST**。引擎不会在一次调用里捎带多条；`slot`/`keyword` 之外还会带一个
+  可选的 `topicId`（引擎侧的选题 id，用于生成后精确回填选题库——不认这个字段可以忽略）。
+- **你的端点说"忙"就是"忙"**。并发上限满时按契约返回
+  `409 {"error":"busy","message":"…"}`；引擎把它映射成结构化的 `generate_provider_busy`
+  （**不是失败**），并发 > 1 时退避重试有限次，否则如实告诉使用者"项目侧正忙"。
+  参考实现（`examples/generate-provider-http/server.mjs`）的 `GENERATE_CONCURRENCY` 就是这里。
+
+**注意别把并发调成"引擎想并行、项目侧却串行"**：项目侧的全局锁会让第 2 条起直接失败或空转。
+要真并行，两边的并发必须**同批**放开——步骤见 [`writing-pipelines.md`](writing-pipelines.md) §9。
+
+**为什么 provider 走异步**（续）/ 端点细节：`POST /generate` 的请求与响应形态见
+[`../examples/generate-provider-http/README.md`](../examples/generate-provider-http/README.md)。
+
 **为什么执行器是能力而不是配置**：引擎不执行接入方的业务脚本。
 "到点"只是引擎发一次请求，**执行方与执行环境都由项目决定**，引擎只做编排与记账。
 这样容器化部署才是对的：linux 容器里跑不了宿主原生二进制。

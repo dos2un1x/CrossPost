@@ -137,3 +137,28 @@
 | 实现槽位执行器的端点              | [`../examples/slot-runner-http/`](../examples/slot-runner-http/)                   |
 | 调度声明与触发策略                | [`scheduling.md`](scheduling.md)                                                   |
 | 把引擎挂到 agent 上（DSH preset） | [`preset/crosspost/README.md`](../preset/crosspost/README.md)                      |
+
+## 9. 「一键生成」是队列；把并发调大之前必须先做的事
+
+**引擎侧现在就是一个队列**：Console 上连点几条选题（或点「一键生成全部未生成」）会
+排成 FIFO，按 `topicsGenerateMaxConcurrency`（默认 **1**）逐条执行，每行显示
+「排队中（第 N 位）」/「生成中 · 已运行 mm:ss」/「查看《…》」/「失败 + 重试」。
+默认 1 意味着**今天的实际节奏没变**——变的是"点了就有反馈、失败不会连累后一条、
+不用盯着屏幕手点重试"。
+
+### 想真正并行，要同时放开三处
+
+| #   | 在哪                          | 改什么                                                                                                     | 不改会怎样                                                                        |
+| --- | ----------------------------- | ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| 1   | 项目侧 `generate_once.sh`     | 把全局锁 `/tmp/wechat-auto-publisher-gen.lock` 改成**按 slot/keyword 分锁**                                | 第 2 条起拿到锁就 `[SKIP] … 本轮跳过`（exit 2），引擎侧看到的是"成功但其实没生成" |
+| 2   | 项目侧 `generate_provider.sh` | `GENERATE_CONCURRENCY=1` → 目标值（改完要重启 provider）                                                   | provider 回 `409 busy`；引擎会如实报"项目侧正忙"，并发 > 1 时退避重试到超时为止   |
+| 3   | 引擎                          | `config.json` 的 `topicsGenerateMaxConcurrency` 调到 2–3（或临时用 `CROSSPOST_TOPIC_GEN_MAX_CONCURRENCY`） | 引擎仍按并发 1 排队，前面两处白放开                                               |
+
+**先说代价**：一条任务 = 一次完整 dsh 会话，通常要跑几分钟。
+并发 3 意味着同时烧三份 token，也意味着三条流水线同时往同一个 `topic-pool.json` 写
+——引擎侧的回填已经加了锁（`<history>/.topic-pool.lock`），但**项目侧的
+`topic_pool_upsert.py` 也要加锁**，否则两边的读—改—写仍会互相覆盖。
+
+**建议顺序**：先按默认 1 用一阵（确认排队、重试、逐行状态符合预期），再改 1+2，
+最后把 3 调到 2，观察一周再决定要不要到 3。上限硬夹在 5——那是成本护栏，
+不是技术上限。

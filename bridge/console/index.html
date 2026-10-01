@@ -256,6 +256,17 @@
             id="topics-summary"
             style="margin-left: 14px; color: var(--ink-faint); font-size: 12px"
           ></span>
+          <!-- v2.97：批量入口 —— 把当前筛选结果里所有"未生成"选题一次排进生成队列。
+               队列在引擎侧串行（默认并发 1），所以这里是"排进去"而不是"同时跑"。 -->
+          <button
+            id="topics-gen-pending"
+            class="btn mini ghost"
+            style="margin-left: 12px"
+            disabled
+            title="把当前筛选结果里所有未生成的选题排进生成队列（恒写草稿，不推送）"
+          >
+            一键生成全部未生成
+          </button>
         </div>
       </div>
       <!-- 选题库「一键生成」状态条（2026-09-17）：结构由 views-topics.mjs 的 topicBannerView 渲染；

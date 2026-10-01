@@ -163,6 +163,31 @@ docker compose down                                       # 停止（数据都�
 docker compose down -v                                    # 连依赖卷一起删（下次启动会重新装依赖）
 ```
 
+### 拉取了新代码之后，怎么让容器跑上新版
+
+先分清"哪一半是活的挂载、哪一半是需要重建的产物"，再决定动哪一步：
+
+| 变的是什么                              | 容器要做什么                                     | 为什么                                                                                          |
+| --------------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `bridge/**`、`crosspost-runtime/src/**` | `docker compose restart crosspost`               | 同路径挂载：文件**立刻**就是新的；但桥是常驻进程，只在启动时 import 一次 → 必须重启进程才会加载 |
+| `crosspost-runtime/core/src/**`         | 重启 **+** `crosspost setup`（重建 `core/dist`） | `core/dist` 是**容器私有卷**：`build` 只作用镜像层，`restart` 更不会重建它                      |
+| `docker-compose.yml` / `Dockerfile`     | `docker compose up -d`                           | 变的是容器定义。注意 **`up -d` 只在定义真的变了时才重建容器**——纯代码更新跑它可能什么都不发生   |
+| `package.json` / lock（新增依赖）       | `docker compose exec crosspost crosspost setup`  | entrypoint 的"缺依赖才装"按**关键包存在性**判断，已存在就不会重装                               |
+
+> **别只看"容器还 healthy"。** 桥不 import `@crosspost/core`，所以 `core/dist` 空/旧
+> 时容器照样 healthy、Console 照样打得开——只有真正发布那条路才炸。
+>
+> 判断"进程是否已加载新代码"要**用行为自证**，而不是看版本号：代码是挂载的，
+> 容器里的源码版本永远等于宿主机当前检出的版本。挑一个**新版本才有**的端点问一下，
+> 用状态码区分新旧（下例的问法要求带上项目头、且那个项目真有选题库，按自己的接口与项目改）：
+>
+> ```bash
+> T=$(cat bridge/token.local)
+> curl -s -o /dev/null -w '%{http_code}\n' -H "X-CrossPost-Token: $T" \
+>   -H 'X-CrossPost-Project: <项目 id>' \
+>   http://127.0.0.1:9540/proxy/topics/generate/tasks    # 200=已加载新代码；404=还是旧进程
+> ```
+
 > 依赖卷都是**可再生的**：删掉之后下一次 `up` 会自动重装依赖、重建 core，只是多花几分钟。
 > 真出现孤儿卷（例如手工改过项目名）按下式回收——**用通配，别抄具体名字**：
 >

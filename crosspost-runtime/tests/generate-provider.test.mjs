@@ -833,7 +833,7 @@ test('调用⑨：draftId 与 taskId 分离 —— 没报告时必须留空，**
   )
 })
 
-test('参考实现②：并发上限生效（第二个任务得到 409，被映射成可读失败）', async () => {
+test('参考实现②：并发上限生效（第二个任务得到 409，被映射成可读的"正忙"）', async () => {
   const logsDir = path.join(SANDBOX, 'provider-logs2')
   const script = path.join(SANDBOX, 'slow-generate.sh')
   fs.writeFileSync(script, '#!/bin/sh\nsleep 2\nexit 0\n', { mode: 0o755 })
@@ -856,13 +856,50 @@ test('参考实现②：并发上限生效（第二个任务得到 409，被映�
     const first = callGenerateProvider(provider, { slot: 'noon', keyword: 'a' })
     await new Promise((r) => setTimeout(r, 400)) // 等第一个任务确实被受理并在跑
     const second = await callGenerateProvider(provider, { slot: 'noon', keyword: 'b' })
-    assert.equal(second.error, 'generate_provider_failed')
-    assert.match(second.message, /409|busy|并发/)
+    // v2.111：409 从"失败"里拆出来了。项目侧还在跑 ≠ 生成失败——
+    // 落成 generate_provider_failed 会让用户去排错，而其实只需要等一会。
+    assert.equal(second.error, 'generate_provider_busy')
+    assert.equal(second.busy, true, '必须能机器识别这是"忙"，供引擎决定是否退避重试')
+    assert.match(second.message, /409|正忙|并发|busy/)
     const firstOut = await first
     assert.ok(firstOut.taskId, `第一个任务应正常跑完，实际 ${JSON.stringify(firstOut)}`)
   } finally {
     await new Promise((r) => server.close(r))
   }
+})
+
+test('参考实现②b：409 的退避重试按开关走（关：一次就回；开：重试后仍忙则如实上报）', async () => {
+  // 用一个**永远回 409** 的桩端点来数 POST 次数：这比"靠 sleep 卡项目侧并发"
+  // 稳定得多——时间敏感的重试用真实并发去测，必然在慢机器上飘。
+  let posts = 0
+  await withServer(
+    async (req, res) => {
+      if (req.method === 'POST') posts += 1
+      res.writeHead(409, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'busy', message: '已有 1 个生成任务在运行（并发上限 1）' }))
+    },
+    async (base) => {
+      const provider = providerFor(`${base}/generate`, { statusUrl: `${base}/status` })
+
+      // ① 默认：只发一次，回结构化"正忙"（不偷偷重试）
+      posts = 0
+      const noRetry = await callGenerateProvider(provider, { slot: 'noon', keyword: 'x' })
+      assert.equal(noRetry.error, 'generate_provider_busy')
+      assert.equal(noRetry.busy, true)
+      assert.equal(posts, 1, `缺省不该重试，实际发了 ${posts} 次`)
+
+      // ② 打开退避：会重试若干次；退避基数 2s，所以这里只断言"确实多发了"
+      posts = 0
+      const retried = await callGenerateProvider(provider, {
+        slot: 'noon',
+        keyword: 'y',
+        allowBusyRetry: true,
+      })
+      assert.equal(retried.error, 'generate_provider_busy', '一直忙就要如实上报，不能装作失败/成功')
+      assert.ok(posts > 1, `打开退避后应重发，实际只发了 ${posts} 次`)
+      assert.match(retried.message, /正忙/)
+    },
+  )
 })
 
 test('参考实现③：未设 token 时不做鉴权；设了 token 则 401（探活端点除外）', async () => {
@@ -944,15 +981,18 @@ test('桥接②：走 manifest 声明的 HTTP 端点跑通一次「一键生成�
   try {
     const topics = await import('../../bridge/topics.mjs')
     const { withProject } = await import('../src/project-context.mjs')
-    const r = await withProject('p-e2e', () => topics.startTopicGenerate('noon', KEYWORD))
+    const r = withProject('p-e2e', () => topics.startTopicGenerate('noon', KEYWORD))
     assert.equal(r.ok, true, `应受理，实际 ${JSON.stringify(r)}`)
     assert.equal(r.task.providerKind, 'http')
 
     // 轮询到收敛（异步模式：受理不等于完成）
+    // v2.111：判据从"代表任务不是 running"改成"**没有任何任务**在跑或排队"。
+    // 队列化之后 `st.state` 是"代表任务"的状态，单看它可能在还有排队任务时就报 done。
     let st = null
     for (let i = 0; i < 60; i++) {
       st = withProject('p-e2e', () => topics.getTopicGenStatus())
-      if (st.state !== 'running') break
+      const busy = st.tasks.some((t) => t.state === 'running' || t.state === 'queued')
+      if (!busy) break
       await new Promise((r2) => setTimeout(r2, 100))
     }
     assert.equal(st.state, 'done', `最终状态应为 done，实际 ${JSON.stringify(st)}`)

@@ -6,7 +6,7 @@ import { initTheme } from './modules/theme.mjs'
 import { initArticlesView, loadArticles, refreshStats } from './modules/views-articles.mjs'
 import { openDetail, closeDetail } from './modules/views-detail.mjs'
 import { initDetailView } from './modules/views-detail-actions.mjs'
-import { initTopicsView, loadTopics } from './modules/views-topics.mjs'
+import { initTopicsView, loadTopics, stopTopicsPoll } from './modules/views-topics.mjs'
 import { initRetainedView, loadRetained } from './modules/views-retained.mjs'
 import { initArchiveView, loadArchive } from './modules/views-archive.mjs'
 import { initReportsView, loadReports } from './modules/views-reports.mjs'
@@ -31,6 +31,9 @@ import { loadSlotLexicon } from './modules/slot-lexicon.mjs'
 function switchView(name, opts = {}) {
   // 离开设置视图即停止状态轮询（2026-09-11：避免后台空转；只读 /proxy/status 也不该常驻）
   if (name !== 'settings') stopSettingsPoll()
+  // 同理（v2.97）：离开选题视图即停"逐条生成任务"轮询。任务本身在**引擎侧**继续跑，
+  // 这里只停前端轮询——回到选题页时 loadTopics() 会重新把任务表取回来。
+  if (name !== 'topics') stopTopicsPoll()
   document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'))
   document
     .querySelectorAll('.tab')

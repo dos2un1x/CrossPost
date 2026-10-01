@@ -57,6 +57,16 @@ export const DEFAULT_OVERALL_TIMEOUT_MS = 3600000
 /** 健康探测的默认超时（doctor 用，必须短） */
 export const DEFAULT_PROBE_TIMEOUT_MS = 1500
 
+/**
+ * 端点返回 409 busy 时的重试上限（v2.111）。
+ *
+ * 只在引擎侧并发 > 1 时才可能触发：一条任务 = 一次 POST，409 意味着**项目侧没接单**
+ * （provider 的 `GENERATE_CONCURRENCY` 满了），因此"稍后再 POST 一次"是安全的
+ * ——不会开出两条真实生成。退避后仍忙就如实上报"项目侧忙"，不装作失败。
+ */
+export const BUSY_RETRY_MAX = 3
+const BUSY_RETRY_BASE_MS = 2000
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 /** 环回主机名（含 IPv6 字面量的方括号形态） */
@@ -371,6 +381,21 @@ async function postGenerate(provider, { slot, keyword, projectId }) {
     data = null
   }
 
+  // 409：项目侧在忙（provider 的并发上限已满），**不是失败**。
+  // v2.111 前这里落到下面的 generate_provider_failed，于是"项目侧还有任务在跑"
+  // 在 Console 上表现为"生成失败"——用户会去排错，而其实只需要等一会。
+  // 单独给一个错误码，让调用方可以（并发>1 时）退避重试、否则给人话。
+  if (res.status === 409) {
+    const inner = data && (data.message || data.error)
+    return {
+      error: 'generate_provider_busy',
+      busy: true,
+      message:
+        (inner ? `${inner} · ` : '') +
+        `项目侧生成端点正忙（${provider.url}${dialNote(provider)}）· 稍后重试`,
+    }
+  }
+
   if (!res.ok) {
     const inner = data && (data.message || data.error)
     return {
@@ -504,16 +529,39 @@ async function pollGenerate(provider, taskId, { onProgress } = {}) {
  * ——调用方是一个 HTTP 路由，抛出去只会变成 500 加一句栈。
  *
  * 注意：本函数只负责"发起并跟踪一次任务"，**并发保护与状态机在
- * `bridge/topics.mjs`**（引擎不假设项目侧的幂等性，同一时刻只放一个任务）。
+ * `bridge/topics.mjs`**（引擎不假设项目侧的幂等性：队列在引擎侧，这条调用
+ * 只在拿到运行位之后才发生）。
+ *
+ * v2.111：`allowBusyRetry` 打开时，端点返回 409 会**退避后重发**（最多 BUSY_RETRY_MAX 次）。
+ * 这只在引擎侧并发 > 1 时被打开——那种情况下 409 是"项目侧并发更小，等一下就能接单"，
+ * 重发安全（409 意味着项目侧根本没接单，不会开出两条真实生成）。
  *
  * @param {object} provider resolveGenerateProvider() 的返回值
- * @param {{slot?:string,keyword?:string,projectId?:string|null,onProgress?:(p:object)=>void}} [opts]
+ * @param {{slot?:string,keyword?:string,projectId?:string|null,onProgress?:(p:object)=>void,
+ *          allowBusyRetry?:boolean}} [opts]
  */
 export async function callGenerateProvider(
   provider,
-  { slot, keyword, projectId, onProgress } = {},
+  { slot, keyword, projectId, onProgress, allowBusyRetry = false } = {},
 ) {
-  const post = await postGenerate(provider, { slot, keyword, projectId })
+  let post = await postGenerate(provider, { slot, keyword, projectId })
+  for (let attempt = 0; post.error === 'generate_provider_busy'; attempt++) {
+    if (!allowBusyRetry || attempt >= BUSY_RETRY_MAX) break
+    // 退避带抖动：避免多条任务在同一刻齐步重试、把刚空出的并发位再次挤满
+    const wait = BUSY_RETRY_BASE_MS * 2 ** attempt + Math.floor(Math.random() * 500)
+    if (typeof onProgress === 'function') {
+      try {
+        onProgress({
+          state: 'running',
+          logTail: `项目侧生成端点正忙，${Math.round(wait / 1000)}s 后重试（第 ${attempt + 1}/${BUSY_RETRY_MAX} 次）`,
+        })
+      } catch {
+        /* ignore */
+      }
+    }
+    await sleep(wait)
+    post = await postGenerate(provider, { slot, keyword, projectId })
+  }
   if (post.error) return post
   if (post.state !== 'running')
     return {

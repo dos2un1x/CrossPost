@@ -18,23 +18,23 @@
 路由按域分组如下（`<...>` 表示前缀匹配；完整清单与逐条实现以 `bridge/run-bridge.mjs`
 的 `ROUTES` 表为准）：
 
-| 分组        | 路由                                                                                                                                                                                         |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 状态 / 自检 | `GET /proxy/health`（含四条 worker 车道）· `GET /proxy/status`（版本 + 扩展 + 平台缓存 + autoPush）· `GET /proxy/doctor` · `GET /proxy/platforms`                                            |
-| 平台口径    | `GET /proxy/platform-matrix`（平台数量与分级的**唯一来源**）                                                                                                                                 |
-| 项目        | `GET /proxy/projects`（注册表摘要）                                                                                                                                                          |
-| 配置        | `GET /proxy/config` · `POST /proxy/config`（按引擎级/项目级分层写入）                                                                                                                        |
-| 样式        | `GET /proxy/styles` · `POST /proxy/render` · `POST /proxy/styles-delete` · `POST /proxy/styles-rename` · `POST /proxy/styles-toggle`                                                         |
-| 封面 / 品牌 | `POST /proxy/cover` · `POST /proxy/cover-gallery` · `GET /proxy/cover-settings` · `POST /proxy/cover-settings` · `POST /proxy/icon`                                                          |
-| 内容        | `GET /proxy/articles` · `GET /proxy/articles/<id>` · `GET /proxy/draft/<id>` · `POST /proxy/save-draft` · `POST /proxy/update-draft` · `POST /proxy/delete-draft` · `POST /proxy/set-status` |
-| 留存 / 归档 | `GET /proxy/retained` · `POST /proxy/retained/<id>` · `POST /proxy/retain` · `GET /proxy/archive` · `POST /proxy/archive` · `POST /proxy/classify` · `POST /proxy/set-risk`                  |
-| 发布        | `POST /proxy/publish` · `POST /proxy/publish-styled` · `POST /proxy/publish-douyin` · `POST /proxy/mark-published` · `POST /proxy/notify-test` · `POST /proxy/backfill`                      |
-| 调度        | `GET /proxy/schedule` · `POST /proxy/schedule` · `POST /proxy/schedule/upsert` · `POST /proxy/schedule/remove` · `POST /proxy/schedule/run` · `POST /proxy/schedule-reset`                   |
-| 选题        | `GET /proxy/topics` · `POST /proxy/topics/generate` · `GET /proxy/topics/generate/status` · `POST /proxy/topics/delete`                                                                      |
-| 费用        | `GET /proxy/costs` · `GET /proxy/cost/<id>`                                                                                                                                                  |
-| 备份        | `GET /proxy/backup` · `POST /proxy/backup`                                                                                                                                                   |
-| 扩展直发    | `POST /proxy/request`（按扩展消息契约代发一个请求）                                                                                                                                          |
-| 单机素材    | `GET /console/*`（Console 静态页）· `GET /brand-icon`（自定义品牌图标，免鉴权：浏览器拉 favicon 不带 token）                                                                                 |
+| 分组        | 路由                                                                                                                                                                                                                                      |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 状态 / 自检 | `GET /proxy/health`（含四条 worker 车道）· `GET /proxy/status`（版本 + 扩展 + 平台缓存 + autoPush）· `GET /proxy/doctor` · `GET /proxy/platforms`                                                                                         |
+| 平台口径    | `GET /proxy/platform-matrix`（平台数量与分级的**唯一来源**）                                                                                                                                                                              |
+| 项目        | `GET /proxy/projects`（注册表摘要）                                                                                                                                                                                                       |
+| 配置        | `GET /proxy/config` · `POST /proxy/config`（按引擎级/项目级分层写入）                                                                                                                                                                     |
+| 样式        | `GET /proxy/styles` · `POST /proxy/render` · `POST /proxy/styles-delete` · `POST /proxy/styles-rename` · `POST /proxy/styles-toggle`                                                                                                      |
+| 封面 / 品牌 | `POST /proxy/cover` · `POST /proxy/cover-gallery` · `GET /proxy/cover-settings` · `POST /proxy/cover-settings` · `POST /proxy/icon`                                                                                                       |
+| 内容        | `GET /proxy/articles` · `GET /proxy/articles/<id>` · `GET /proxy/draft/<id>` · `POST /proxy/save-draft` · `POST /proxy/update-draft` · `POST /proxy/delete-draft` · `POST /proxy/set-status`                                              |
+| 留存 / 归档 | `GET /proxy/retained` · `POST /proxy/retained/<id>` · `POST /proxy/retain` · `GET /proxy/archive` · `POST /proxy/archive` · `POST /proxy/classify` · `POST /proxy/set-risk`                                                               |
+| 发布        | `POST /proxy/publish` · `POST /proxy/publish-styled` · `POST /proxy/publish-douyin` · `POST /proxy/mark-published` · `POST /proxy/notify-test` · `POST /proxy/backfill`                                                                   |
+| 调度        | `GET /proxy/schedule` · `POST /proxy/schedule` · `POST /proxy/schedule/upsert` · `POST /proxy/schedule/remove` · `POST /proxy/schedule/run` · `POST /proxy/schedule-reset`                                                                |
+| 选题        | `GET /proxy/topics` · `POST /proxy/topics/generate` · `POST /proxy/topics/generate/batch` · `GET /proxy/topics/generate/tasks` · `GET /proxy/topics/generate/status` · `POST /proxy/topics/generate/cancel` · `POST /proxy/topics/delete` |
+| 费用        | `GET /proxy/costs` · `GET /proxy/cost/<id>`                                                                                                                                                                                               |
+| 备份        | `GET /proxy/backup` · `POST /proxy/backup`                                                                                                                                                                                                |
+| 扩展直发    | `POST /proxy/request`（按扩展消息契约代发一个请求）                                                                                                                                                                                       |
+| 单机素材    | `GET /console/*`（Console 静态页）· `GET /brand-icon`（自定义品牌图标，免鉴权：浏览器拉 favicon 不带 token）                                                                                                                              |
 
 ```bash
 T=$(cat bridge/token.local)

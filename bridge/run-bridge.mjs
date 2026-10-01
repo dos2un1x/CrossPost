@@ -48,7 +48,16 @@ import {
   projectOverriddenKeys,
   readProjectConfig,
 } from '../crosspost-runtime/src/config-layers.mjs'
-import { listTopics, deleteTopic, startTopicGenerate, getTopicGenStatus } from './topics.mjs'
+import {
+  listTopics,
+  deleteTopic,
+  startTopicGenerate,
+  getTopicGenStatus,
+  getTopicGenTasks,
+  cancelTopicGenerate,
+  preflightGenerate,
+  setConfigReader as setTopicsConfigReader,
+} from './topics.mjs'
 import { normalizeSlotId } from '../crosspost-runtime/src/scheduler/spec.mjs'
 import { detectIconExt } from './icon-detect.mjs'
 import {
@@ -117,6 +126,28 @@ function requireDeleteAuth(reqData) {
   }
 }
 
+/**
+ * 校验一条「一键生成」批量入参（v2.111）。
+ *
+ * 批量入口一次收 N 条，其中一条不合法不该让整批失败——返回 `null` 表示这条可用，
+ * 否则返回带原因的对象，由调用方放进 `failures` 里逐条回报。
+ * 规则与单条入口**逐字一致**（栏目 id 形状 + keyword 非空），否则批量会成为绕过校验的后门。
+ */
+function validateTopicItem(it) {
+  const slot = it && it.slot
+  if (!normalizeSlotId(slot)) {
+    return {
+      slot: slot ?? null,
+      keyword: (it && it.keyword) || null,
+      message: 'slot 必须是合法的栏目 id（小写字母开头，字母/数字/横线，≤32 字）',
+    }
+  }
+  if (!it.keyword || !String(it.keyword).trim()) {
+    return { slot, keyword: null, message: 'keyword 必填' }
+  }
+  return null
+}
+
 /* 2026-09-18（v2.01，引擎自治）：路径改为懒解析。
  * 原先 `const paths = loadPaths()` 在桥启动时固化全部路径，使配置变更、
  * 隔离沙箱与多项目接入都无法生效。token 文件路径同样改为按需解析。 */
@@ -124,6 +155,11 @@ const paths = lazyPaths()
 const BRIDGE_DIR = path.dirname(fileURLToPath(import.meta.url))
 const CONSOLE_DIR = path.join(BRIDGE_DIR, 'console')
 const BRAND_DIR = path.join(BRIDGE_DIR, 'brand')
+
+/* 选题库生成队列读配置的来源（v2.111）：注入桥自己的读法，而不是让 topics.mjs
+ * 直接 import —— 桥认 `CROSSPOST_CONFIG` 与项目覆盖层，两处必须同源，
+ * 否则会出现"Console 读的是沙箱配置、队列读的是生产配置"那类脑裂（v2.47 教训）。 */
+setTopicsConfigReader(() => readFullRuntimeConfig())
 
 /* ── 本地 API 最小鉴权（2026-08-24 P0-3）──────────────────────────────
  * token.local：bridge 启动生成随机 token（600 权限），
@@ -1757,13 +1793,26 @@ const ROUTES = [
   {
     method: 'GET',
     match: '/proxy/topics',
-    handler: (c) => c.sendJson(200, { topics: listTopics(), task: getTopicGenStatus() }),
+    handler: (c) =>
+      c.sendJson(200, {
+        topics: listTopics(),
+        task: getTopicGenStatus(),
+        // v2.111：逐条任务视图（Console 逐行渲染排队位次/进度用）
+        tasks: getTopicGenTasks().tasks,
+      }),
   },
   {
     method: 'POST',
     match: '/proxy/topics/generate',
     handler: async (c) => {
-      const { slot, keyword } = JSON.parse((await c.readBody()) || '{}')
+      let body = {}
+      try {
+        body = JSON.parse((await c.readBody()) || '{}')
+      } catch {
+        c.sendJson(400, { error: '请求体不是合法 JSON' })
+        return
+      }
+      const { slot, keyword, topicId, date } = body
       // 栏目由项目声明，引擎不设白名单：只校验 id 形状（小写字母开头，字母/数字/横线，≤32 字）
       if (!normalizeSlotId(slot)) {
         c.sendJson(400, {
@@ -1775,15 +1824,109 @@ const ROUTES = [
         c.sendJson(400, { error: 'keyword 必填' })
         return
       }
-      const r = await startTopicGenerate(slot, String(keyword).trim())
+      // v2.111：入队前先探一次端点（TCP，不触发真实生成）。`probe:false` 可跳过
+      // （批量入口会用一次探测代表整批，避免 N 次重复拨号）。
+      if (body.probe !== false) {
+        const pre = await preflightGenerate()
+        if (!pre.ok) {
+          c.sendJson(pre.code === 'generate_not_provided' ? 501 : 503, {
+            error: pre.code,
+            message: pre.message,
+            provided: pre.code !== 'generate_not_provided',
+          })
+          return
+        }
+      }
+      // 入队是同步的：拿到 task id 就能立刻回「排队中（第 N 位）」，执行由队列驱动
+      const r = startTopicGenerate(slot, String(keyword).trim(), { topicId, date })
       // 2026-09-18（v2.01）：能力未提供（引擎不再代跑外部脚本）→ 501 + 可读说明，
       // 而不是笼统 409；Console 依 `provided:false` 隐藏入口。
       if (r && r.error === 'generate_not_provided') {
         c.sendJson(501, r)
         return
       }
+      c.sendJson(r.error ? 409 : 202, r)
+    },
+  },
+  {
+    method: 'POST',
+    match: '/proxy/topics/generate/batch',
+    handler: async (c) => {
+      let body = {}
+      try {
+        body = JSON.parse((await c.readBody()) || '{}')
+      } catch {
+        c.sendJson(400, { error: '请求体不是合法 JSON' })
+        return
+      }
+      const items = Array.isArray(body.items) ? body.items : []
+      if (!items.length) {
+        c.sendJson(400, { error: 'items 必填（[{slot, keyword, topicId?, date?}]）' })
+        return
+      }
+      if (items.length > 50) {
+        c.sendJson(400, { error: `一次最多入队 50 条（收到 ${items.length}）` })
+        return
+      }
+      // 整批只探一次端点：N 条选题指向同一个端点，逐条探测只是重复拨号
+      const pre = await preflightGenerate()
+      if (!pre.ok) {
+        c.sendJson(pre.code === 'generate_not_provided' ? 501 : 503, {
+          error: pre.code,
+          message: pre.message,
+          provided: pre.code !== 'generate_not_provided',
+        })
+        return
+      }
+      const queued = []
+      const rejected = []
+      for (const it of items) {
+        const bad = validateTopicItem(it)
+        if (bad) {
+          rejected.push({ ...bad, error: 'bad_request' })
+          continue
+        }
+        const r = startTopicGenerate(it.slot, String(it.keyword).trim(), {
+          topicId: it.topicId,
+          date: it.date,
+        })
+        if (r.error)
+          rejected.push({ slot: it.slot, keyword: it.keyword, error: r.error, message: r.message })
+        else queued.push(r.task)
+      }
+      c.sendJson(200, {
+        ok: true,
+        queued: queued.length,
+        rejected: rejected.length,
+        tasks: queued,
+        failures: rejected,
+        ...getTopicGenTasks(),
+      })
+    },
+  },
+  {
+    method: 'POST',
+    match: '/proxy/topics/generate/cancel',
+    handler: async (c) => {
+      let body = {}
+      try {
+        body = JSON.parse((await c.readBody()) || '{}')
+      } catch {
+        c.sendJson(400, { error: '请求体不是合法 JSON' })
+        return
+      }
+      if (!body.id) {
+        c.sendJson(400, { error: 'id 必填（任务 id，见 /proxy/topics/generate/tasks）' })
+        return
+      }
+      const r = cancelTopicGenerate(body.id)
       c.sendJson(r.error ? 409 : 200, r)
     },
+  },
+  {
+    method: 'GET',
+    match: '/proxy/topics/generate/tasks',
+    handler: (c) => c.sendJson(200, getTopicGenTasks()),
   },
   {
     method: 'GET',

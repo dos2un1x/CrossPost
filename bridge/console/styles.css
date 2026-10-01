@@ -2382,6 +2382,18 @@ html[data-theme='dark'] .batch-count {
 .t-article:hover {
   text-decoration: underline;
 }
+/* 逐条生成状态格（v2.97）：一列里可能同时有按钮 + 取消 + 原因，保持紧凑
+   （队列化之后这里会比"一行一个按钮"更常出现多元素） */
+.tgen-cell {
+  white-space: nowrap;
+}
+.tgen-cell .btn + .btn {
+  margin-left: 4px;
+}
+.tgen-cell .t-reason {
+  white-space: normal;
+  max-width: 200px;
+}
 .btn.mini {
   font-size: 11.5px;
   padding: 4px 10px;
